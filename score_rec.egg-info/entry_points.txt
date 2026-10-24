@@ -1,0 +1,2 @@
+[console_scripts]
+score-rec = score_rec.cli:main

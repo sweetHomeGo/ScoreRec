@@ -1,0 +1,6 @@
+.venv/
+.python/
+__pycache__/
+*.py[cod]
+score_rec_out/
+.score-rec/
