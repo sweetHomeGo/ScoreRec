@@ -11,14 +11,12 @@ def detect_onsets(y, sr, gap):
         return []
     hop = 512
     env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
-    scale = float(np.percentile(env, 95))
-    if scale < 1e-6:
-        return []
+    scale = max(float(np.percentile(env, 99)), 1e-8)
     env_n = env / scale
     wait = max(1, int(gap * sr / hop))
-    frames = peak_pick(env_n, pre_max=3, post_max=3, pre_avg=8, post_avg=8, delta=0.1, wait=wait)
+    frames = peak_pick(env_n, pre_max=3, post_max=3, pre_avg=8, post_avg=8, delta=0.3, wait=wait)
     peak = float(np.max(np.abs(y)))
-    floor = peak * 0.02
+    floor = peak * 0.08
     ref = max(float(np.percentile(np.abs(y), 99)), 1e-8)
     hits = []
     for frame in np.atleast_1d(frames):
@@ -55,20 +53,39 @@ def is_open_hat(y, sr, t, next_t):
         None,
     )
     decay = (n * win / sr) if quiet_at is None else (quiet_at * win / sr)
-    return decay >= 0.12
+    return decay >= 0.18
+
+
+def _peak_at(y, sr, time, radius=0.03):
+    center = int(time * sr)
+    width = max(1, int(radius * sr))
+    window = y[max(0, center - width) : center + width]
+    return float(np.max(np.abs(window))) if window.size else 0.0
 
 
 def transcribe_stems(stem_paths, sr=44100):
-    hits = []
+    loaded = {}
+    events = []
     for drum, path in stem_paths.items():
         y, file_sr = librosa.load(path, sr=sr, mono=True)
+        loaded[drum] = (y, file_sr)
         gap = 0.04 if drum == "hh" else DRUMS[drum]["gap"]
-        found = detect_onsets(y, file_sr, gap)
-        for index, (t, velocity) in enumerate(found):
-            kind = drum
-            if drum == "hh":
-                next_t = found[index + 1][0] if index + 1 < len(found) else None
-                kind = "hh_open" if is_open_hat(y, file_sr, t, next_t) else "hh_closed"
-            hits.append(Hit(round(t, 3), kind, velocity))
+        for time, velocity in detect_onsets(y, file_sr, gap):
+            events.append((time, velocity, drum, _peak_at(y, file_sr, time)))
+    hits = []
+    for time, velocity, drum, level in events:
+        loudest = level
+        for other, (y, file_sr) in loaded.items():
+            if other != drum:
+                loudest = max(loudest, _peak_at(y, file_sr, time))
+        if level < loudest * 0.6:
+            continue
+        kind = drum
+        if drum == "hh":
+            y, file_sr = loaded[drum]
+            later = [item[0] for item in events if item[2] == "hh" and item[0] > time + 0.01]
+            next_t = later[0] if later else None
+            kind = "hh_open" if is_open_hat(y, file_sr, time, next_t) else "hh_closed"
+        hits.append(Hit(round(time, 3), kind, velocity))
     hits.sort(key=lambda hit: (hit.time, hit.drum))
     return hits

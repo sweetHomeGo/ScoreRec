@@ -45,6 +45,16 @@ def _attacks(y, sr, hop):
     return times
 
 
+def _limit_polyphony(notes, limit):
+    chosen = []
+    for note in sorted(notes, key=lambda item: -item.velocity):
+        overlap = sum(other.time < note.end and note.time < other.end for other in chosen)
+        if overlap < limit:
+            chosen.append(note)
+    chosen.sort(key=lambda item: (item.time, item.pitch))
+    return chosen
+
+
 def _merge_overlaps(notes):
     ordered = sorted(notes, key=lambda note: (note.part, note.pitch, note.time))
     merged = []
@@ -90,9 +100,12 @@ def _supported(midi, vec, fmin_midi):
     center = _bin(vec, midi, fmin_midi)
     if center <= 0:
         return False
-    if center < max(_bin(vec, midi - 1, fmin_midi), _bin(vec, midi + 1, fmin_midi)) * 0.75:
+    if center < max(_bin(vec, midi - 1, fmin_midi), _bin(vec, midi + 1, fmin_midi)) * 0.9:
         return False
-    return center >= float(np.max(vec)) * 0.035
+    peak = float(np.max(vec))
+    if center < peak * 0.18:
+        return False
+    return center >= float(np.median(vec)) * 6
 
 
 def suppress_harmonics(notes, curves, fmin_midi=FMIN_MIDI):
@@ -107,11 +120,11 @@ def suppress_harmonics(notes, curves, fmin_midi=FMIN_MIDI):
             low, high = notes[index], notes[other]
             if high.pitch - low.pitch not in (12, 19, 24):
                 continue
-            if abs(high.time - low.time) > 0.045:
+            if abs(high.time - low.time) > 0.08:
                 continue
-            if high.end - high.time > max(0.35, (low.end - low.time) * 1.6):
+            if high.end - high.time > max(0.4, (low.end - low.time) * 1.8):
                 continue
-            if _bin(curves[other], high.pitch, fmin_midi) < _bin(curves[index], low.pitch, fmin_midi) * 0.55:
+            if _bin(curves[other], high.pitch, fmin_midi) < _bin(curves[index], low.pitch, fmin_midi) * 0.8:
                 dropped.add(other)
     return [note for index, note in enumerate(notes) if index not in dropped]
 
@@ -159,8 +172,9 @@ def cleanup_notes(notes, y, sr, part):
             continue
         kept.append(Note(note.time, note.end, pitch, note.velocity, note.part))
         curves.append(vec)
-    cleaned = suppress_harmonics(kept, curves)
-    return _merge_overlaps([_snap_start(note, attacks) for note in cleaned])
+    cleaned = [_snap_start(note, attacks) for note in suppress_harmonics(kept, curves)]
+    limit = {"guitar": 4, "piano": 6, "vocals": 1, "bass": 1}.get(part, 4)
+    return _merge_overlaps(_limit_polyphony(cleaned, limit))
 
 
 def transcribe_mono(y, sr, part, fmin, fmax, tuning=0.0):
@@ -201,7 +215,11 @@ def transcribe_mono(y, sr, part, fmin, fmax, tuning=0.0):
         if end - start >= 0.08:
             segment = y[int(start * sr) : max(int(start * sr) + 1, int(end * sr))]
             rms = float(np.sqrt(np.mean(segment * segment))) if segment.size else 0.0
-            notes.append(Note(round(start, 3), round(end, 3), int(np.round(np.median(pitches))), _velocity(min(rms / 0.2, 1.0)), part))
+            velocity = _velocity(min(rms / 0.2, 1.0))
+            if velocity < 24:
+                index = stop
+                continue
+            notes.append(Note(round(start, 3), round(end, 3), int(np.round(np.median(pitches))), velocity, part))
         index = stop
     return notes
 

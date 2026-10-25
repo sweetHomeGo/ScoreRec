@@ -48,7 +48,7 @@ class DrumTests(unittest.TestCase):
         self.assertTrue(is_open_hat(tone(sr, 0.40, 0.20), sr, 0.0, None))
 
         quiet = np.zeros(int(3 * sr), dtype=np.float32)
-        for hit_time, amp in ((0.40, 1.0), (1.10, 0.05), (2.00, 0.4)):
+        for hit_time, amp in ((0.40, 1.0), (1.10, 0.25), (2.00, 0.4)):
             i = int(hit_time * sr)
             m = int(0.03 * sr)
             env = np.exp(-np.linspace(0, 7, m)).astype(np.float32)

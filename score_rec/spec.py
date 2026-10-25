@@ -59,8 +59,8 @@ def _part(name, low, high, poly, program, channel, clef, onset=0.5, frame=0.3, m
 
 PARTS = {
     "vocals": _part("人声", "C3", "C6", False, 53, 0, "treble"),
-    "guitar": _part("吉他", "E2", "E6", True, 25, 1, "treble", onset=0.4, frame=0.22, min_ms=60),
-    "piano": _part("钢琴", "A0", "C8", True, 0, 2, "grand", onset=0.5, frame=0.3, min_ms=80),
+    "guitar": _part("吉他", "E2", "E6", True, 25, 1, "treble", onset=0.5, frame=0.34, min_ms=100),
+    "piano": _part("钢琴", "A0", "C8", True, 0, 2, "grand", onset=0.52, frame=0.36, min_ms=110),
     "bass": _part("贝斯", "E1", "C4", False, 32, 3, "bass"),
 }
 
