@@ -108,6 +108,20 @@ def _supported(midi, vec, fmin_midi):
     return center >= float(np.median(vec)) * 6
 
 
+def suppress_shadowed(notes, curves, fmin_midi=FMIN_MIDI):
+    energies = [_bin(curves[index], notes[index].pitch, fmin_midi) for index in range(len(notes))]
+    dropped = set()
+    for index, note in enumerate(notes):
+        for other, rival in enumerate(notes):
+            if other == index or abs(note.time - rival.time) > 0.05:
+                continue
+            if rival.pitch - note.pitch == 12 and energies[index] < energies[other] * 0.85:
+                dropped.add(index)
+            elif energies[index] < energies[other] * 0.5:
+                dropped.add(index)
+    return _kept(notes, curves, dropped)
+
+
 def suppress_harmonics(notes, curves, fmin_midi=FMIN_MIDI):
     dropped = set()
     order = sorted(range(len(notes)), key=lambda index: (notes[index].time, notes[index].pitch))
@@ -126,7 +140,11 @@ def suppress_harmonics(notes, curves, fmin_midi=FMIN_MIDI):
                 continue
             if _bin(curves[other], high.pitch, fmin_midi) < _bin(curves[index], low.pitch, fmin_midi) * 0.8:
                 dropped.add(other)
-    return [note for index, note in enumerate(notes) if index not in dropped]
+    return _kept(notes, curves, dropped)
+
+
+def _kept(notes, curves, dropped):
+    return [note for index, note in enumerate(notes) if index not in dropped], [curve for index, curve in enumerate(curves) if index not in dropped]
 
 
 def _snap_start(note, attacks):
@@ -172,7 +190,9 @@ def cleanup_notes(notes, y, sr, part):
             continue
         kept.append(Note(note.time, note.end, pitch, note.velocity, note.part))
         curves.append(vec)
-    cleaned = [_snap_start(note, attacks) for note in suppress_harmonics(kept, curves)]
+    kept, curves = suppress_harmonics(kept, curves)
+    kept, curves = suppress_shadowed(kept, curves)
+    cleaned = [_snap_start(note, attacks) for note in kept]
     limit = {"guitar": 4, "piano": 6, "vocals": 1, "bass": 1}.get(part, 4)
     return _merge_overlaps(_limit_polyphony(cleaned, limit))
 
