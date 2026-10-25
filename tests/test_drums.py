@@ -1,3 +1,4 @@
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,7 +7,9 @@ import mido
 import numpy as np
 import soundfile as sf
 
-from score_rec.drums import detect_onsets, find_stem, is_open_hat, transcribe_stems, write_midi, write_timeline
+from score_rec.drums import detect_onsets, is_open_hat, transcribe_stems
+from score_rec.export import write_drum_midi, write_timeline
+from score_rec.separate import _pcm_wav, ensure_ffmpeg, find_stem
 
 
 def tone(sr, decay, tau, at=0.0, length=0.6):
@@ -44,6 +47,15 @@ class DrumTests(unittest.TestCase):
         self.assertFalse(is_open_hat(tone(sr, 0.03, 0.008), sr, 0.0, None))
         self.assertTrue(is_open_hat(tone(sr, 0.40, 0.20), sr, 0.0, None))
 
+        quiet = np.zeros(int(3 * sr), dtype=np.float32)
+        for hit_time, amp in ((0.40, 1.0), (1.10, 0.05), (2.00, 0.4)):
+            i = int(hit_time * sr)
+            m = int(0.03 * sr)
+            env = np.exp(-np.linspace(0, 7, m)).astype(np.float32)
+            quiet[i : i + m] += amp * rng.standard_normal(m).astype(np.float32) * env
+        found = [t for t, _ in detect_onsets(quiet, sr, 0.05)]
+        self.assertEqual(len(found), 3)
+
     def test_timeline_and_midi(self):
         sr = 22050
         with tempfile.TemporaryDirectory() as temp:
@@ -57,7 +69,7 @@ class DrumTests(unittest.TestCase):
             self.assertTrue(any(hit.drum == "hh_open" for hit in hits))
             text_path, _ = write_timeline(hits, "song.wav", root)
             self.assertIn("底鼓", text_path.read_text(encoding="utf-8"))
-            midi_path = write_midi(hits, root / "drums.mid")
+            midi_path = write_drum_midi(hits, root / "drums.mid")
             notes = []
             tick = 0
             for msg in mido.MidiFile(midi_path).tracks[0]:
@@ -66,6 +78,29 @@ class DrumTests(unittest.TestCase):
                     notes.append(msg.note)
             self.assertIn(36, notes)
             self.assertIn(46, notes)
+
+    def test_mp3_becomes_pcm_wav(self):
+        ensure_ffmpeg()
+        ffmpeg = shutil_which()
+        if ffmpeg is None:
+            self.skipTest("没有 ffmpeg")
+        sr = 22050
+        y = (0.2 * np.sin(2 * np.pi * 440 * np.arange(sr) / sr)).astype(np.float32)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            wav = root / "tone.wav"
+            mp3 = root / "tone.mp3"
+            sf.write(wav, y, sr, subtype="PCM_16")
+            subprocess.run([ffmpeg, "-y", "-i", str(wav), str(mp3)], check=True, capture_output=True)
+            converted = _pcm_wav(mp3, root)
+            info = sf.info(converted)
+            self.assertEqual(info.subtype, "PCM_16")
+            sf.write(root / "copy.wav", sf.read(converted)[0], info.samplerate, subtype=info.subtype)
+
+
+def shutil_which():
+    import shutil
+    return shutil.which("ffmpeg")
 
 
 if __name__ == "__main__":
